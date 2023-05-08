@@ -1,10 +1,12 @@
-from gcerutils.config import get_config
-from gcerutils.data.dataset import get_dataset
-from gcerutils.model import get_model
-from gcerutils.training import get_trainer
-from gcerutils.evaluation import evalutate
+from gcerlib.configs.config import get_config
+# from gcerlib.data.dataset import get_dataset
+# from gcerlib.model import get_model
+# from gcerlib.training import get_trainer
+# from gcerlib.evaluation import evalutate
 
 def main(config):
+    
+    print(config)
     
     dataset = get_dataset(config) # np array prob? depends on config
     model = get_model(config) # returns torch.nn.Module

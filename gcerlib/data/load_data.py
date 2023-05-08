@@ -1,10 +1,10 @@
+import torchgeo
 import os
 
-def get_data(config):
-    data_directory = config.data_directory
-    # load from tiffs
-    final_dataset = {
-        np.array
-    }
-    if config.load_from_tiff:
-        
+SUPPORTED_IMAGE_FORMATS = ["jpg", "jpeg", "png"]
+
+def get_dataset(config):
+    
+    # check if dataset is tif/tiff
+    extension = os.path.splitext(config.dataset.inputs.filename_glob)[1]
+    print(extension)
