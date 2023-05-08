@@ -1,0 +1,51 @@
+---
+  experiment_name: test_config_load_1
+  include_date_in_results_folder: True
+
+  dataset:
+    dir: test_data
+    splits: # leave empty for 0 split
+      - train
+      - val
+      - test
+    gt_target_folders:
+      - img
+      - mask
+    
+    # options for specifying files to loads
+    # landsat 8 provided as example
+    # https://torchgeo.readthedocs.io/en/latest/tutorials/custom_raster_dataset.html
+    inputs:
+      filename_glob: "T*_B02_10m.tif"
+      filename_regex:
+      date_format: "%Y%m%dT%H%M%S"
+      is_image: True
+      separate_files: True
+      all_bands: ["B02", "B03", "B04", "B08"]
+      rgb_bands: ["B04", "B03", "B02"]
+    targets:
+      filename_glob: 
+      filename_regex:
+      date_format: "%Y%m%dT%H%M%S"
+      is_image: False
+      separate_files: False
+    
+    # only used if dataset.splits is empty
+    # specify sampler to use: dataset splt (0,1)
+    
+    splits_to_use:
+      train: 
+        random: 0.6
+      val: 
+        random: 0.2
+      test:
+        grid: 0.2
+
+    
+    
+
+    # save numpy arrays
+
+
+
+---
