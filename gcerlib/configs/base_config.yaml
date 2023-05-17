@@ -4,30 +4,31 @@
     include_date_in_results_folder: True
 
     dataset:
-      dir: test_data
+      dir: "test_datasets/tiffs_only/nyc_lc"
       splits: # leave empty for 0 split
-        - train
-        - val
-        - test
+        # - train
+        # - val
+        # - test
       gt_target_folders:
-        - img
-        - mask
+        # - input: 
+        # - output: 
       
       # options for specifying files to loads
       # landsat 8 provided as example
       # https://torchgeo.readthedocs.io/en/latest/tutorials/custom_raster_dataset.html
       inputs:
-        filename_glob: "T*_B02_10m.tif"
+        filename_glob: "ortho_*.tif"
         filename_regex:
-        date_format: "%Y%m%dT%H%M%S"
-        is_image: True
-        separate_files: True
-        all_bands: ["B02", "B03", "B04", "B08"]
-        rgb_bands: ["B04", "B03", "B02"]
+        date_format: 
+        is_image: False
+        separate_files: False
+        all_bands: ["Green", "Red", "NIR"]
+        rgb_bands: ["Green", "Red", "NIR"]
+
       targets:
-        filename_glob: 
-        filename_regex:
-        date_format: "%Y%m%dT%H%M%S"
+        filename_glob: "landcover*.tif"
+        # filename_regex:
+        # date_format: "%Y%m%dT%H%M%S"
         is_image: False
         separate_files: False
       
