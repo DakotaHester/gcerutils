@@ -145,7 +145,7 @@ class FullySupervisedTrainer(BaseTrainer):
                 self.update_batch_metrics(y_pred, y_true)
                 tepoch.set_postfix(loss=loss.item())
                 
-                # if i > 5: break
+                if i > 2: break
         
         self.update_history(epoch_loss, phase='train')
         self.print_batch_metrics()
@@ -179,7 +179,7 @@ class FullySupervisedTrainer(BaseTrainer):
 
                 tepoch.set_postfix(val_loss=loss.item())
                 
-                # if i > 5: break
+                if i > 2: break
         
         self.update_history(epoch_val_loss, phase='val')
         self.print_batch_metrics()
@@ -334,29 +334,34 @@ class FullySupervisedTrainer(BaseTrainer):
         pass
     
     def train(self):
-        self.model.to(self.device)
-        
-        best_loss, best_epoch = np.inf, 0
-        early_stopper = EarlyStopper(patience=self.early_stopping_patience, min_delta=self.early_stopping_min_delta)
-        
-        for epoch in range(self.num_epochs):
-            self.epoch = epoch+1
-            _ = self.train_step()
-            val_loss = self.val_step()
-            if self.save_every_model:
-                # save model
-                torch.save(self.model.state_dict(), os.path.join(self.model_path, f'epoch_{self.epoch}_val_loss_{val_loss}.pth'))
-            if self.save_best_model and val_loss < best_loss:
-                best_loss = val_loss
-                best_epoch = self.epoch
-                torch.save(self.model.state_dict(), os.path.join(self.model_path, f'best_model_epoch_{best_epoch}_val_loss_{val_loss}.pth'))
-            if early_stopper.early_stop(val_loss):
-                print(f'[TRAIN] Stopping training at epoch {self.epoch} with val_loss {val_loss:.4f} and best_epoch {best_epoch} with best_val_loss {best_loss:.4f}')
-                break
-        
-        self.save_history()
-        self.plot_history()
-        return self.model
+        try:
+            self.model.to(self.device)
+            
+            best_loss, best_epoch = np.inf, 0
+            early_stopper = EarlyStopper(patience=self.early_stopping_patience, min_delta=self.early_stopping_min_delta)
+            
+            for epoch in range(self.num_epochs):
+                self.epoch = epoch+1
+                _ = self.train_step()
+                val_loss = self.val_step()
+                if self.save_every_model:
+                    # save model
+                    torch.save(self.model.state_dict(), os.path.join(self.model_path, f'epoch_{self.epoch}_val_loss_{val_loss}.pth'))
+                if self.save_best_model and val_loss < best_loss:
+                    best_loss = val_loss
+                    best_epoch = self.epoch
+                    torch.save(self.model.state_dict(), os.path.join(self.model_path, f'best_model_epoch_{best_epoch}_val_loss_{val_loss}.pth'))
+                if early_stopper.early_stop(val_loss):
+                    print(f'[TRAIN] Stopping training at epoch {self.epoch} with val_loss {val_loss:.4f} and best_epoch {best_epoch} with best_val_loss {best_loss:.4f}')
+                    break
+            
+            self.save_history()
+            self.plot_history()
+            return self.model
+        except KeyboardInterrupt:
+            print(f'[TRAIN] Stopping training at epoch {self.epoch} with val_loss {val_loss:.4f} and best_epoch {best_epoch} with best_val_loss {best_loss:.4f}')
+            self.save_history()
+            self.plot_history()
 
     def plot_history(self):
         for metric_fn in self.metric_fns:
