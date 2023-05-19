@@ -22,6 +22,17 @@ def get_dataset(config):
             print(e)
             print('[DATA] Could not find saved dataset. Loading from source.')
     
+    else:
+        # check if dataset is tif/tiff
+        extension = os.path.splitext(config.dataset.inputs.filename_glob)[1]
+        
+        if extension == ".tiff":
+            print('[DATA] Loading from GeoTIFF')
+            dataset = tiff_loader(config)    
+        elif extension in SUPPORTED_IMAGE_FORMATS:
+            print(f'[DATA] Loading from image ({extension})')
+            dataset = img_loader(config) 
+        
     if config.dataset.save_datasets:
         out_file = os.path.join(config.out_path, 'datasets.pkl')
         print(f'[DATA] Saving datasets to {out_file}')
@@ -29,22 +40,6 @@ def get_dataset(config):
     
     config['dataset']['image_size'] = dataset['train']['input'][0].shape[1]
     return dataset
-    
-    # check if dataset is tif/tiff
-    
-    extension = os.path.splitext(config.dataset.inputs.filename_glob)[1]
-    print(config.dataset)
-    print(extension)
-    if extension == ".tiff":
-        print('[DATA] Loading from GeoTIFF')
-        dataset = tiff_loader(config)
-    
-    elif extension in SUPPORTED_IMAGE_FORMATS:
-        print(f'[DATA] Loading from image ({extension})')
-        dataset = img_loader(config) 
-    
-    print(dataset)
-
 
 def determine_dataset_directory_structure(config):
     root = Path(config.dataset.dir)
