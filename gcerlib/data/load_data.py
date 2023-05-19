@@ -11,9 +11,26 @@ SUPPORTED_IMAGE_FORMATS = [".jpg", ".jpeg", ".png"]
 
 def get_dataset(config):
     
+    if config.dataset.load_saved_dataset:
+        try:
+            out_file = os.path.join(config.out_path, 'datasets.pkl')
+            print(f'[DATA] Loading saved dataset from {out_file}')
+            if not os.path.exists(config.out_path):
+                raise FileNotFoundError(f'Could not find {out_file}')
+            dataset = pickle.load(open(out_file, 'rb'))
+        except FileNotFoundError as e:
+            print(e)
+            print('[DATA] Could not find saved dataset. Loading from source.')
+    
+    if config.dataset.save_datasets:
+        out_file = os.path.join(config.out_path, 'datasets.pkl')
+        print(f'[DATA] Saving datasets to {out_file}')
+        pickle.dump(dataset, open(out_file, 'wb'))
+    
+    config['dataset']['image_size'] = dataset['train']['input'][0].shape[1]
+    return dataset
+    
     # check if dataset is tif/tiff
-    
-    
     
     extension = os.path.splitext(config.dataset.inputs.filename_glob)[1]
     print(config.dataset)
@@ -54,7 +71,7 @@ def determine_dataset_directory_structure(config):
             return dirs
         else:
             # case 2b: folders for input/target, but no split subfolders
-            print('CASE 2b\n'+ str(root))
+            # print('CASE 2b\n'+ str(root))
             dirs = {io: root / io for io in config.dataset.gt_target_folders}
             # print(dirs)
             return dirs
@@ -110,10 +127,7 @@ def img_loader(config):
             print(f'[DATA] Loaded {len(X_val)} validation samples')
             print(f'[DATA] Loaded {len(X_test)} testing samples')
             
-            if config.dataset.save_datasets:
-                out_file = os.path.join(config.out_path, 'datasets.pkl')
-                print(f'[DATA] Saving datasets to {out_file}')
-                pickle.dump(dataset, open(out_file, 'wb'))
+
             
             return dataset
         # just root directory

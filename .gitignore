@@ -1,3 +1,9 @@
+# data folders
+nyc_test_1/
+test_data_load_1/
+test_datasets/
+test_subfolders/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

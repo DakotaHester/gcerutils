@@ -3,6 +3,9 @@ from yconf import BaseConfiguration
 import os
 import datetime
 from torch.cuda import is_available
+import random
+from torch import manual_seed
+import numpy as np
 
 def create_output_folder(config):
     # print(args, config)
@@ -35,5 +38,11 @@ def get_config():
     print("[CONFIG] Loaded config from ", config.configPath)
 
     config = create_output_folder(config)
+    set_seeds(config.seed)
     
     return config
+
+def set_seeds(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    manual_seed(seed)
