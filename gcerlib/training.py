@@ -362,6 +362,7 @@ class FullySupervisedTrainer(BaseTrainer):
             print(f'[TRAIN] Stopping training at epoch {self.epoch} with val_loss {val_loss:.4f} and best_epoch {best_epoch} with best_val_loss {best_loss:.4f}')
             self.save_history()
             self.plot_history()
+            exit()
 
     def plot_history(self):
         for metric_fn in self.metric_fns:
