@@ -4,6 +4,7 @@ test_data_load_1/
 test_datasets/
 test_subfolders/
 nyc_lc_run_1/
+old_runs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -165,3 +166,7 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+/nyc_lc_run_2
+/old_runs
+/runs
+/nyc_lc_8class.yaml

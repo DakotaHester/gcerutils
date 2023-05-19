@@ -13,6 +13,9 @@ import numpy as np
 import cv2
 from matplotlib import pyplot as plt
 from matplotlib.colors import ListedColormap
+from pathlib import Path
+import re
+from torch.utils.tensorboard import SummaryWriter
 
 # determine the appropriate trainer to use
 def get_trainer(config, dataset, model):
@@ -56,6 +59,7 @@ class FullySupervisedTrainer(BaseTrainer):
     def __init__(self, config, dataset, model):
         super().__init__()
         
+        self.config = config
         self.device = config.device
         print(f'[TRAIN] Using device: {self.device}')
         self.dataset = dataset
@@ -110,10 +114,13 @@ class FullySupervisedTrainer(BaseTrainer):
         self.early_stopping_min_delta = config.training.early_stopping_min_delta
         self.metrics_reduction = config.evaluation.metrics_reduction
         
+        self.config.training.return_best_model = config.training.return_best_model
+        self.config.evaluation.use_best_model = config.evaluation.use_best_model
+        self.config.evaluation.use_model_path = config.evaluation.use_model_path
+        
         self.train_loader = DataLoader(dataset=ImageDictLoader(dataset['train'], config), batch_size=self.batch_size, shuffle=True, num_workers=2, pin_memory=True)
         self.val_loader = DataLoader(dataset=ImageDictLoader(dataset['val'], config), batch_size=self.batch_size, shuffle=True, num_workers=2, pin_memory=True)
         self.test_loader = DataLoader(dataset=ImageDictLoader(dataset['test'], config), batch_size=1, shuffle=False, num_workers=2, pin_memory=True)
-            
 
     def train_step(self):
         self.model.train()
@@ -147,6 +154,7 @@ class FullySupervisedTrainer(BaseTrainer):
                 
                 # if i > 2: break
         
+        epoch_loss /= len(self.train_loader)
         self.update_history(epoch_loss, phase='train')
         self.print_batch_metrics()
 
@@ -180,7 +188,7 @@ class FullySupervisedTrainer(BaseTrainer):
                 tepoch.set_postfix(val_loss=loss.item())
                 
                 # if i > 2: break
-        
+        epoch_val_loss /= len(self.val_loader)
         self.update_history(epoch_val_loss, phase='val')
         self.print_batch_metrics()
 
@@ -217,9 +225,7 @@ class FullySupervisedTrainer(BaseTrainer):
                 
                 if self.save_all_test_data:
                     # visualize errors
-                    for j in range(len(X)):
-                        print(range(len(X)))
-                        
+                    for j in range(len(X)):                        
                         if len(X) == 1:
                             image_id = f'{i:04d}'
                         else:
@@ -330,18 +336,42 @@ class FullySupervisedTrainer(BaseTrainer):
         df = pd.DataFrame(self.history)
         df.to_csv(os.path.join(self.out_path,'history.csv'), index=False)
     
+    def load_history(self):
+        history = pd.read_csv(os.path.join(self.out_path,'history.csv'))
+        self.history = history.to_dict(orient='list')
+        print(self.history)
+    
     def plot_curves(self):
         pass
     
     def train(self):
         try:
+            use_tb = self.config.training.tensorboard
+            
+            if use_tb: writer = SummaryWriter()
+            
+            self.epoch = 0
+            if self.config.training.load_from_checkpoint:
+                # quick way to find best epoch model
+                models = list(Path(self.model_path).glob('best_model*.pth'))
+                last_epoch = 0
+                for model in models:
+                    epoch = int(re.findall(r'(?<=best_model_epoch_)\d+', str(model))[0])
+                    if epoch > last_epoch: 
+                        last_model = model
+                        last_epoch = epoch
+                self.model.load_state_dict(torch.load(last_model))
+                self.load_history()
+                self.epoch = last_epoch
+                print(f'[TRAIN] Loaded last model at epoch {last_epoch}')
+            
             self.model.to(self.device)
             
             best_loss, best_epoch = np.inf, 0
             early_stopper = EarlyStopper(patience=self.early_stopping_patience, min_delta=self.early_stopping_min_delta)
             
-            for epoch in range(self.num_epochs):
-                self.epoch = epoch+1
+            while self.epoch < self.num_epochs:
+                self.epoch += 1
                 _ = self.train_step()
                 val_loss = self.val_step()
                 if self.save_every_model:
@@ -354,14 +384,21 @@ class FullySupervisedTrainer(BaseTrainer):
                 if early_stopper.early_stop(val_loss):
                     print(f'[TRAIN] Stopping training at epoch {self.epoch} with val_loss {val_loss:.4f} and best_epoch {best_epoch} with best_val_loss {best_loss:.4f}')
                     break
+                if use_tb:
+                    writer.add_scalar('Loss/train', self.history['train_loss'][-1], self.epoch)
+                    writer.add_scalar('Loss/val', self.history['val_loss'][-1], self.epoch)
+                    for metric_fn in self.metric_fns:
+                        writer.add_scalar(f'{metric_fn.__name__}/train', self.history[f'train_{metric_fn.__name__}'][-1], self.epoch)
+                        writer.add_scalar(f'{metric_fn.__name__}/val', self.history[f'val_{metric_fn.__name__}'][-1], self.epoch)
             
             self.save_history()
             self.plot_history()
+            if self.config.training.return_best_model:
+                self.model.load_state_dict(torch.load(os.path.join(self.model_path, f'best_model_epoch_{best_epoch}_val_loss_{best_loss}.pth')))
             return self.model
         except KeyboardInterrupt:
             print(f'[TRAIN] Stopping training at epoch {self.epoch} with val_loss {val_loss:.4f} and best_epoch {best_epoch} with best_val_loss {best_loss:.4f}')
             self.save_history()
-            self.plot_history()
             exit()
 
     def plot_history(self):
@@ -377,8 +414,8 @@ class FullySupervisedTrainer(BaseTrainer):
             plt.savefig(os.path.join(self.plot_paths, f'{metric_fn.__name__}.png'))
             plt.close()
             
-        plt.plot(self.history['epoch'], self.history['train_loss'], label='train')
-        plt.plot(self.history['epoch'], self.history['val_loss'], label='val')
+        plt.plot(self.history['epoch'], self.history['train_loss']/len(self.train_loader), label='train')
+        plt.plot(self.history['epoch'], self.history['val_loss']/len(self.val_loader), label='val')
         val_min = min(self.history[f'val_loss'])
         arg_val_min = self.history[f'val_loss'].index(val_min)+1
         plt.plot(arg_val_min, val_min, 'ro', label=f'{val_min:.4f} at epoch {arg_val_min}')
@@ -389,10 +426,34 @@ class FullySupervisedTrainer(BaseTrainer):
         plt.close()
         
     def evaluate(self):
+        
+        if self.config.evaluation.use_best_model:
+            # quconfig.evaluation.useway to find best epoch model
+            best_models = list(Path(self.model_path).glob('best_model*.pth'))
+            best_epoch = 0
+            for model in best_models:
+                epoch = int(re.findall(r'(?<=best_model_epoch_)\d+', str(model))[0])
+                if epoch > best_epoch: 
+                    best_model = model
+                    best_epoch = epoch
+            self.model.load_state_dict(torch.load(best_model))
+            print('[EVALUATE] Loaded best model:', best_model)
+
+        elif self.eval_model_path:
+            self.model.load_state_dict(torch.load(self.eval_model_path))
+            print('[EVALUATE] Loaded model:', self.eval_model_path)
+
+        if self.config.evaluation.load_previous_log:
+            self.load_history()
+            print('[EVALUATE] Loaded previous history:', os.path.join(self.out_path,'history.csv'))
+        
+        
+        print('[EVALUATE] Plotting history...')
+        self.plot_history()
         self.model.to(self.device)
-    
+            
+        print('[EVALUATE] Evaluating...')
         self.test_step()
-        pass
         
 # https://stackoverflow.com/questions/71998978/early-stopping-in-pytorch
 class EarlyStopper:
