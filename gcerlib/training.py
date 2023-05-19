@@ -145,7 +145,7 @@ class FullySupervisedTrainer(BaseTrainer):
                 self.update_batch_metrics(y_pred, y_true)
                 tepoch.set_postfix(loss=loss.item())
                 
-                if i > 2: break
+                # if i > 2: break
         
         self.update_history(epoch_loss, phase='train')
         self.print_batch_metrics()
@@ -179,7 +179,7 @@ class FullySupervisedTrainer(BaseTrainer):
 
                 tepoch.set_postfix(val_loss=loss.item())
                 
-                if i > 2: break
+                # if i > 2: break
         
         self.update_history(epoch_val_loss, phase='val')
         self.print_batch_metrics()
