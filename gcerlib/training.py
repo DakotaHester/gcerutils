@@ -108,6 +108,7 @@ class FullySupervisedTrainer(BaseTrainer):
         self.epoch = 1
         self.early_stopping_patience = config.training.early_stopping_patience
         self.early_stopping_min_delta = config.training.early_stopping_min_delta
+        self.metrics_reduction = config.evaluation.metrics_reduction
         
         self.train_loader = DataLoader(dataset=ImageDictLoader(dataset['train'], config), batch_size=self.batch_size, shuffle=True, num_workers=2, pin_memory=True)
         self.val_loader = DataLoader(dataset=ImageDictLoader(dataset['val'], config), batch_size=self.batch_size, shuffle=True, num_workers=2, pin_memory=True)
@@ -217,8 +218,9 @@ class FullySupervisedTrainer(BaseTrainer):
                 if self.save_all_test_data:
                     # visualize errors
                     for j in range(len(X)):
+                        print(range(len(X)))
                         
-                        if range(len(X)) == 1:
+                        if len(X) == 1:
                             image_id = f'{i:04d}'
                         else:
                             image_id = f'{i:04d}_{j:04d}'
@@ -307,7 +309,7 @@ class FullySupervisedTrainer(BaseTrainer):
             batch_metrics[metric_fn.__name__] = []
         self.batch_metrics = batch_metrics
     
-    def update_batch_metrics(self, y_pred, y_true, reduction='micro'):
+    def update_batch_metrics(self, y_pred, y_true):
         tp, fp, fn, tn = get_stats(
             output=y_pred.argmax(dim=1) if self.num_classes > 1 else y_pred, # might not work with binary segmentation
             target=y_true,
@@ -315,7 +317,7 @@ class FullySupervisedTrainer(BaseTrainer):
             num_classes=self.num_classes,
         )
         for metric_fn in self.metric_fns:
-            value = metric_fn(tp, fp, fn, tn, reduction=reduction)
+            value = metric_fn(tp, fp, fn, tn, reduction=self.metrics_reduction)
             self.batch_metrics[metric_fn.__name__].append(float(value))
     
     def print_batch_metrics(self):
@@ -353,6 +355,7 @@ class FullySupervisedTrainer(BaseTrainer):
                 break
         
         self.save_history()
+        self.plot_history()
         return self.model
 
     def plot_history(self):
@@ -381,8 +384,7 @@ class FullySupervisedTrainer(BaseTrainer):
         
     def evaluate(self):
         self.model.to(self.device)
-        
-        self.plot_history()
+    
         self.test_step()
         pass
         
