@@ -11,6 +11,7 @@ def load_input(config):
         all_bands=config.dataset.inputs.all_bands,
         rgb_bands=config.dataset.inputs.rgb_bands,
     
+    
     if config.dataset.splits:
         for split in config.dataset.splits:
             if os.path.isdir(os.path.join(config.dataset.inputs.dir, split)):

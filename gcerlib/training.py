@@ -1,3 +1,4 @@
+import sys
 import torch
 from torch import optim
 import segmentation_models_pytorch as smp
@@ -16,6 +17,8 @@ from matplotlib.colors import ListedColormap
 from pathlib import Path
 import re
 from torch.utils.tensorboard import SummaryWriter
+from torchvision import transforms
+from gcerlib.data.load_data import ImageDictLoader
 
 # determine the appropriate trainer to use
 def get_trainer(config, dataset, model):
@@ -23,31 +26,6 @@ def get_trainer(config, dataset, model):
     
     if schema in ['fully supervised', 'fs', 'fully', 'supervised', 'f']:
         return FullySupervisedTrainer(config, dataset, model)
-
-# for loading dicts of numpy images
-class ImageDictLoader(Dataset):
-    def __init__(self, dataset, config, mode='train'):
-        super().__init__()
-        
-        self.dataset = dataset
-        # dataset is in batch, h, w, c format
-        # manipulate to batch, c, h, w format
-        for key in self.dataset.keys():
-            self.dataset[key] = np.moveaxis(self.dataset[key], -1, 1)
-            # print(f'[DATA] {key} shape: {self.dataset[key].shape}')
-    
-    def __getitem__(self, index):
-        
-        # NO PREPROCESSING FOR NOW
-        # TODO add preprocessing
-        # memory pinning?
-        input = self.dataset['input'][index]
-        target = self.dataset['target'][index]
-        
-        return input, target
-    
-    def __len__(self):
-        return len(self.dataset['input'])
 
 class BaseTrainer(object):
     def __init__(self):
@@ -72,6 +50,7 @@ class FullySupervisedTrainer(BaseTrainer):
         self.save_best_model = config.training.save_best_model
         self.save_every_model = config.training.save_every_model
         self.num_classes = config.model.classes
+        self.is_binary = self.num_classes == 1
         
         self.out_path = config.out_path
         self.model_path = os.path.join(config.out_path, 'models')
@@ -98,10 +77,14 @@ class FullySupervisedTrainer(BaseTrainer):
         
         # configure loss
         loss_name = config.training.loss.lower()
-        if loss_name in ['crossentropy', 'ce', 'cross', 'entropy', 'c']:
-            self.loss = torch.nn.CrossEntropyLoss()
+        if loss_name in ['crossentropy', 'ce', 'cross', 'entropy', 'c', 'bce']:
+            self.loss = torch.nn.CrossEntropyLoss() if config.model.classes > 1 else torch.nn.BCELoss()
         elif loss_name in ['focal', 'focalloss', 'focal loss']:
             self.loss = FocalLoss(
+                mode='multiclass' if self.num_classes > 1 else 'binary',
+            )
+        elif loss_name in ['jaccard', 'j', 'jac', 'jaccard loss']:
+            self.loss = JaccardLoss(
                 mode='multiclass' if self.num_classes > 1 else 'binary',
             )
         else:
@@ -118,9 +101,13 @@ class FullySupervisedTrainer(BaseTrainer):
         self.config.evaluation.use_best_model = config.evaluation.use_best_model
         self.config.evaluation.use_model_path = config.evaluation.use_model_path
         
-        self.train_loader = DataLoader(dataset=ImageDictLoader(dataset['train'], config), batch_size=self.batch_size, shuffle=True, num_workers=2, pin_memory=True)
-        self.val_loader = DataLoader(dataset=ImageDictLoader(dataset['val'], config), batch_size=self.batch_size, shuffle=True, num_workers=2, pin_memory=True)
-        self.test_loader = DataLoader(dataset=ImageDictLoader(dataset['test'], config), batch_size=1, shuffle=False, num_workers=2, pin_memory=True)
+        self.train_data = ImageDictLoader(dataset['train'], config)
+        self.val_data = ImageDictLoader(dataset['val'], config)
+        self.test_data = ImageDictLoader(dataset['test'], config)
+        
+        self.train_loader = DataLoader(dataset=self.train_data, batch_size=self.batch_size, shuffle=True, num_workers=2, pin_memory=True)
+        self.val_loader = DataLoader(dataset=self.val_data, batch_size=self.batch_size, shuffle=True, num_workers=2, pin_memory=True)
+        self.test_loader = DataLoader(dataset=self.test_data, batch_size=1, shuffle=False, num_workers=2, pin_memory=True)
 
     def train_step(self):
         self.model.train()
@@ -140,8 +127,15 @@ class FullySupervisedTrainer(BaseTrainer):
 
                 # y_pred : Segmentation Result
                 y_pred = self.model(X)
+                if self.config.model.classes == 1:
+                    y_pred = F.sigmoid(y_pred.squeeze()).double()
 
-                loss = self.loss(y_pred, y_true)
+                if self.loss.__class__.__name__ == 'BCELoss':
+                    loss = self.loss(y_pred.double(), y_true.double())
+                elif self.loss.__class__.__name__ == 'CrossEntropyLoss':
+                    loss = self.loss(y_pred, y_true.long())
+                else:
+                    loss = self.loss(y_pred, y_true)
                 epoch_loss += loss.item()
 
                 # Backprop + optimize
@@ -174,13 +168,20 @@ class FullySupervisedTrainer(BaseTrainer):
                 tepoch.set_description(f'Epoch {self.epoch}/{self.num_epochs} Validation')
 
                 # y_true : Ground Truth
-                X = X.to(self.device)
+                X = X.to(self.device).double()
                 y_true = y_true.to(self.device)
 
                 # y_pred : Segmentation Result
                 y_pred = self.model(X)
+                if self.config.model.classes == 1:
+                    y_pred = F.sigmoid(y_pred.squeeze())
 
-                loss = self.loss(y_pred, y_true)
+                if self.loss.__class__.__name__ == 'BCELoss':
+                    loss = self.loss(y_pred.double(), y_true.double())
+                elif self.loss.__class__.__name__ == 'CrossEntropyLoss':
+                    loss = self.loss(y_pred, y_true.long())                
+                else:
+                    loss = self.loss(y_pred, y_true)
                 epoch_val_loss += loss.item()
                 
                 self.update_batch_metrics(y_pred, y_true)
@@ -218,10 +219,15 @@ class FullySupervisedTrainer(BaseTrainer):
                 X = X.to(self.device)
                 y_true = y_true.to(self.device)
                 y_pred = F.sigmoid(self.model(X))
-
-                self.update_batch_metrics(y_pred, y_true)
+                
+                if self.is_binary:
+                    self.update_batch_metrics(y_pred.squeeze(), y_true.squeeze())
+                else:
+                    self.update_batch_metrics(y_pred, y_true)
                 
                 y_pred = y_pred.argmax(dim=1)
+                
+                raw_image = self.test_data.inverse_norm(X.cpu())
                 
                 if self.save_all_test_data:
                     # visualize errors
@@ -234,6 +240,9 @@ class FullySupervisedTrainer(BaseTrainer):
                         # save images, masks, and predictions
                         image = X[j].cpu().numpy().transpose(2, 1, 0)
                         image = (image * 255).astype(np.uint8)
+                        
+                        raw_image = raw_image[j].cpu().numpy().transpose(2, 1, 0)
+                        raw_image = (raw_image * 255).astype(np.uint8)
                         # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
                         # print(image.shape, image.min(), image.max())
                         cv2.imwrite(os.path.join(self.test_images_path, f'{image_id}_input.png'), image)
@@ -251,29 +260,33 @@ class FullySupervisedTrainer(BaseTrainer):
                         cv2.imwrite(os.path.join(self.test_images_path, f'{image_id}_error.png'), target)
                         
                         # save error visualizations
-                        fig, ax = plt.subplots(1, 5)
+                        fig, ax = plt.subplots(2, 3)
                         ax = ax.ravel()
-                        ax[0].imshow(image, interpolation='none')
+                        ax[0].imshow(raw_image, interpolation='none')
                         ax[0].set_xticks([])
                         ax[0].set_yticks([])
                         ax[0].set(xlabel='Optical Data')
-                        ax[1].imshow(target, cmap=seg_cmap, interpolation='none')
-                        ax[1].set(xlabel='Ground Truth')
+                        ax[1].imshow(image, interpolation='none')
                         ax[1].set_xticks([])
                         ax[1].set_yticks([])
-                        ax[2].imshow(pred, cmap=seg_cmap, interpolation='none')
-                        ax[2].set(xlabel='Predicted Mask')
+                        ax[1].set(xlabel='Normalized Data')
+                        ax[2].imshow(target, cmap=seg_cmap, interpolation='none')
+                        ax[2].set(xlabel='Ground Truth')
                         ax[2].set_xticks([])
                         ax[2].set_yticks([])
-                        ax[3].imshow(error, cmap=error_cmap, interpolation='none')
-                        ax[3].set(xlabel='Error')
+                        ax[3].imshow(pred, cmap=seg_cmap, interpolation='none')
+                        ax[3].set(xlabel='Predicted Mask')
                         ax[3].set_xticks([])
                         ax[3].set_yticks([])
-                        ax[4].imshow(image, interpolation='none')
-                        ax[4].imshow(error, cmap=error_cmap, alpha=error.astype(float), interpolation='none')
-                        ax[4].set(xlabel='Error Overlay')
+                        ax[4].imshow(error, cmap=error_cmap, interpolation='none')
+                        ax[4].set(xlabel='Error')
                         ax[4].set_xticks([])
                         ax[4].set_yticks([])
+                        ax[5].imshow(image, interpolation='none')
+                        ax[5].imshow(error, cmap=error_cmap, alpha=error.astype(float), interpolation='none')
+                        ax[5].set(xlabel='Error Overlay')
+                        ax[5].set_xticks([])
+                        ax[5].set_yticks([])
                         
                         fig.tight_layout()
                         plt.style.use('ggplot')
@@ -316,11 +329,15 @@ class FullySupervisedTrainer(BaseTrainer):
         self.batch_metrics = batch_metrics
     
     def update_batch_metrics(self, y_pred, y_true):
+        if self.num_classes == 1:
+            if y_pred.max() > 1 or y_pred.min() < 0:
+                y_pred = F.sigmoid(y_pred).squeeze()
         tp, fp, fn, tn = get_stats(
             output=y_pred.argmax(dim=1) if self.num_classes > 1 else y_pred, # might not work with binary segmentation
             target=y_true,
             mode='multiclass' if self.num_classes > 1 else 'binary',
             num_classes=self.num_classes,
+            threshold=None if self.num_classes > 1 else 0.5,
         )
         for metric_fn in self.metric_fns:
             value = metric_fn(tp, fp, fn, tn, reduction=self.metrics_reduction)
@@ -339,7 +356,6 @@ class FullySupervisedTrainer(BaseTrainer):
     def load_history(self):
         history = pd.read_csv(os.path.join(self.out_path,'history.csv'))
         self.history = history.to_dict(orient='list')
-        print(self.history)
     
     def plot_curves(self):
         pass
@@ -348,7 +364,7 @@ class FullySupervisedTrainer(BaseTrainer):
         try:
             use_tb = self.config.training.tensorboard
             
-            if use_tb: writer = SummaryWriter()
+            if use_tb: writer = SummaryWriter(log_dir=f'runs/{self.config.experiment_name}')
             
             self.epoch = 0
             if self.config.training.load_from_checkpoint:
@@ -360,10 +376,14 @@ class FullySupervisedTrainer(BaseTrainer):
                     if epoch > last_epoch: 
                         last_model = model
                         last_epoch = epoch
-                self.model.load_state_dict(torch.load(last_model))
-                self.load_history()
-                self.epoch = last_epoch
-                print(f'[TRAIN] Loaded last model at epoch {last_epoch}')
+                if last_epoch == 0:
+                    print('[TRAIN] No previous models found. Please check config file (training.load_from_checkpoint).')
+                    print('[TRAIN] Training from scratch...')
+                else:
+                    self.model.load_state_dict(torch.load(last_model))
+                    self.load_history()
+                    self.epoch = last_epoch
+                    print(f'[TRAIN] Loaded last model at epoch {last_epoch}')
             
             self.model.to(self.device)
             
@@ -396,10 +416,20 @@ class FullySupervisedTrainer(BaseTrainer):
             if self.config.training.return_best_model:
                 self.model.load_state_dict(torch.load(os.path.join(self.model_path, f'best_model_epoch_{best_epoch}_val_loss_{best_loss}.pth')))
             return self.model
+
         except KeyboardInterrupt:
             print(f'[TRAIN] Stopping training at epoch {self.epoch} with val_loss {val_loss:.4f} and best_epoch {best_epoch} with best_val_loss {best_loss:.4f}')
             self.save_history()
-            exit()
+            exit(0)
+        
+        except UnboundLocalError as e:
+            print(f'[TRAIN] Error: {e}', file=sys.stderr)
+            print(f'You are most likely trying to load from a previous model that does not exist. Please check your config file.', file=sys.stderr)
+            exit(-1)
+            
+        except Exception as e:
+            print(f'[TRAIN] Error: {e}', file=sys.stderr)
+            exit(-1)
 
     def plot_history(self):
         for metric_fn in self.metric_fns:
@@ -414,8 +444,8 @@ class FullySupervisedTrainer(BaseTrainer):
             plt.savefig(os.path.join(self.plot_paths, f'{metric_fn.__name__}.png'))
             plt.close()
             
-        plt.plot(self.history['epoch'], self.history['train_loss']/len(self.train_loader), label='train')
-        plt.plot(self.history['epoch'], self.history['val_loss']/len(self.val_loader), label='val')
+        plt.plot(self.history['epoch'], self.history['train_loss'], label='train')
+        plt.plot(self.history['epoch'], self.history['val_loss'], label='val')
         val_min = min(self.history[f'val_loss'])
         arg_val_min = self.history[f'val_loss'].index(val_min)+1
         plt.plot(arg_val_min, val_min, 'ro', label=f'{val_min:.4f} at epoch {arg_val_min}')

@@ -6,8 +6,61 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 import json
 import pickle
+import torch
+from torch.utils.data import Dataset
+from torchvision import transforms
 
 SUPPORTED_IMAGE_FORMATS = [".jpg", ".jpeg", ".png"]
+
+class ImageDictLoader(Dataset):
+    def __init__(self, dataset, config, mode='train'):
+        super().__init__()
+        
+        self.dataset = dataset
+        self.normalize = config.dataset.normalize
+        self.device = config.device
+        
+        # dataset is in batch, h, w, c format
+        # manipulate to batch, c, h, w format
+        for key in self.dataset.keys():
+            self.dataset[key] = np.moveaxis(self.dataset[key], -1, 1)
+        
+        self.transform_pipeline = self.transforms()
+        
+    def transforms(self):
+        transforms_list = []
+        if self.normalize:
+            self.get_stats()
+            transforms_list.append(transforms.Normalize(self.mean, self.std))
+
+        return transforms.Compose(transforms_list)
+        
+    def get_stats(self):
+
+        self.mean = np.mean(self.dataset['input'], axis=(0, 2, 3))
+        self.std = np.std(self.dataset['input'], axis=(0, 2, 3))
+        
+        print(self.mean, self.std)
+
+    def __getitem__(self, index):
+        
+        # NO PREPROCESSING FOR NOW
+        # TODO add preprocessing
+        # memory pinning?
+        input = torch.tensor(self.dataset['input'][index], dtype=torch.double)
+        if self.normalize:
+            input = self.transform_pipeline(input)
+        target = torch.tensor(self.dataset['target'][index], dtype=torch.uint8)
+        
+        return input, target
+    
+    def __len__(self):
+        return len(self.dataset['input'])
+    
+    def inverse_norm(self, images):
+        images = images * self.std[np.newaxis, :, np.newaxis, np.newaxis] + self.mean[np.newaxis, :, np.newaxis, np.newaxis]
+        return images
+    
 
 def get_dataset(config):
     
@@ -21,8 +74,9 @@ def get_dataset(config):
         except FileNotFoundError as e:
             print(e)
             print('[DATA] Could not find saved dataset. Loading from source.')
+            config.dataset.load_saved_dataset = False
     
-    else:
+    if not config.dataset.load_saved_dataset:
         # check if dataset is tif/tiff
         extension = os.path.splitext(config.dataset.inputs.filename_glob)[1]
         
@@ -37,7 +91,11 @@ def get_dataset(config):
         out_file = os.path.join(config.out_path, 'datasets.pkl')
         print(f'[DATA] Saving datasets to {out_file}')
         pickle.dump(dataset, open(out_file, 'wb'))
-    
+        
+    if config.dataset.binary_class and config.model.classes == 1:
+        for split in dataset.keys():
+            dataset[split]['target'] = np.array([np.where(mask == config.dataset.binary_class, 1, 0) for mask in dataset[split]['target']])
+
     config['dataset']['image_size'] = dataset['train']['input'][0].shape[1]
     return dataset
 

@@ -38,6 +38,7 @@ def get_config():
     print("[CONFIG] Loaded config from ", config.configPath)
 
     config = create_output_folder(config)
+    print(config)
     set_seeds(config.seed)
     
     return config

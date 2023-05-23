@@ -12,12 +12,6 @@ def main(config):
     trainer = get_trainer(config, dataset, model) # fully supervised only supported initially
     trainer.train()
     trainer.evaluate()
-    
-    # trainer.train(model, dataset, config)
-
-    
-    
-
 
 if __name__ == '__main__':
     config = get_config()
