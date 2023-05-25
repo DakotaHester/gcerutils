@@ -1,22 +1,34 @@
-from torchgeo.datasets import RasterDataset
+# from torchgeo.datasets import RasterDataset
 import os
+import rasterio
+from pathlib import Path
+from rasterio.plot import show
+from numpy import np
 
-def load_input(config):
-    class TiffDataset(RasterDataset):
-        filename_glob=config.dataset.inputs.filename_glob,
-        filename_regex=config.dataset.inputs.filename_regex,
-        date_format=config.dataset.inputs.date_format,
-        is_image=config.dataset.inputs.is_image,
-        separate_files=config.dataset.inputs.separate_files,
-        all_bands=config.dataset.inputs.all_bands,
-        rgb_bands=config.dataset.inputs.rgb_bands,
+def get_tiff_dataset(path, input_glob, output_glob):
+
+    root = Path(path)
+    input_paths = sorted(root.rglob(input_glob))
+    target_paths = sorted(root.rglob(output_glob))
     
+    input_tiffs = [rasterio.open(str(p)) for p in input_paths]
+    target_tiffs = [rasterio.open(str(p)) for p in target_paths]
     
-    if config.dataset.splits:
-        for split in config.dataset.splits:
-            if os.path.isdir(os.path.join(config.dataset.inputs.dir, split)):
-                print(f'Loading {split} split from {config.dataset.inputs.dir}')
-                
-    input_dir = config.dataset.inputs.dir
+    print(f'[DATA] Loaded .tiff from {path}')
     
+    show(input_tiffs[2].read((1, 2, 3)))
+    show(input_tiffs[2].read((4, 3, 1)))
+    show(target_tiffs[2].read())
     
+    X = np.array([tiff.read() for tiff in input_tiffs])
+    y = np.array([tiff.read() for tiff in target_tiffs])
+    
+    return X, y
+        
+    
+
+def main():
+    get_tiff_dataset(path = os.path.join('test_datasets', 'tiffs_sampled'), input_glob = '*img_*.tif', output_glob = '*label_*.tif')
+    
+if __name__ == '__main__':
+    main()

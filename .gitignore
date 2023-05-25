@@ -185,3 +185,4 @@ cython_debug/
 /nyc_lc_8class_BINARY_6
 /nyc_lc_8class_MULTICLASS_ALL
 nyc*
+/.old_env

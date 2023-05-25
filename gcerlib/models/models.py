@@ -31,6 +31,7 @@ def get_model(config):
             encoder_weights=config.model.encoder_weights,
             in_channels=config.model.in_channels,
             classes=config.model.classes,
+            encoder_output_stride=config.model.output_stride,
             # decoder_attention_type=config.model.decoder_attention_type
         )
     

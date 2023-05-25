@@ -39,6 +39,8 @@ class FullySupervisedTrainer(BaseTrainer):
         
         self.config = config
         self.device = config.device
+        if self.device == 'cuda':
+            torch.backends.cudnn.benchmark = True
         print(f'[TRAIN] Using device: {self.device}')
         self.dataset = dataset
         self.model = model.double()
@@ -96,6 +98,7 @@ class FullySupervisedTrainer(BaseTrainer):
         self.early_stopping_patience = config.training.early_stopping_patience
         self.early_stopping_min_delta = config.training.early_stopping_min_delta
         self.metrics_reduction = config.evaluation.metrics_reduction
+        self.grad_accumulation = config.training.accumulate_grads
         
         self.config.training.return_best_model = config.training.return_best_model
         self.config.evaluation.use_best_model = config.evaluation.use_best_model
@@ -121,6 +124,10 @@ class FullySupervisedTrainer(BaseTrainer):
             for i, (X, y_true) in enumerate(tepoch):
                 tepoch.set_description(f'Epoch {self.epoch}/{self.num_epochs} Training')
 
+                # clear grad
+                self.model.zero_grad(set_to_none=True)
+                
+                
                 # y_true : Ground Truth
                 X = X.to(self.device).double()
                 y_true = y_true.to(self.device)
@@ -134,12 +141,13 @@ class FullySupervisedTrainer(BaseTrainer):
                     loss = self.loss(y_pred.double(), y_true.double())
                 elif self.loss.__class__.__name__ == 'CrossEntropyLoss':
                     loss = self.loss(y_pred, y_true.long())
+                elif self.loss.__class__.__name__ == 'JaccardLoss':
+                    loss = self.loss(y_pred, y_true.long())
                 else:
                     loss = self.loss(y_pred, y_true)
                 epoch_loss += loss.item()
 
                 # Backprop + optimize
-                self.model.zero_grad()
                 loss.backward()
                 self.optimizer.step()
                 
@@ -179,7 +187,9 @@ class FullySupervisedTrainer(BaseTrainer):
                 if self.loss.__class__.__name__ == 'BCELoss':
                     loss = self.loss(y_pred.double(), y_true.double())
                 elif self.loss.__class__.__name__ == 'CrossEntropyLoss':
-                    loss = self.loss(y_pred, y_true.long())                
+                    loss = self.loss(y_pred, y_true.long())        
+                elif self.loss.__class__.__name__ == 'JaccardLoss':
+                    loss = self.loss(y_pred, y_true.long())        
                 else:
                     loss = self.loss(y_pred, y_true)
                 epoch_val_loss += loss.item()
@@ -354,8 +364,14 @@ class FullySupervisedTrainer(BaseTrainer):
         df.to_csv(os.path.join(self.out_path,'history.csv'), index=False)
     
     def load_history(self):
-        history = pd.read_csv(os.path.join(self.out_path,'history.csv'))
-        self.history = history.to_dict(orient='list')
+        history_path = os.path.join(self.out_path,'history.csv')
+        if os.path.exists(history_path):
+            history = pd.read_csv(os.path.join(self.out_path,'history.csv'))
+            self.history = history.to_dict(orient='list')
+            return True
+        else:
+            print('[TRAIN] No previous history found. Training from scratch...')
+            return False
     
     def plot_curves(self):
         pass
@@ -367,7 +383,7 @@ class FullySupervisedTrainer(BaseTrainer):
             if use_tb: writer = SummaryWriter(log_dir=f'runs/{self.config.experiment_name}')
             
             self.epoch = 0
-            if self.config.training.load_from_checkpoint:
+            if self.config.training.load_from_checkpoint and self.load_history():
                 # quick way to find best epoch model
                 models = list(Path(self.model_path).glob('best_model*.pth'))
                 last_epoch = 0
@@ -381,7 +397,6 @@ class FullySupervisedTrainer(BaseTrainer):
                     print('[TRAIN] Training from scratch...')
                 else:
                     self.model.load_state_dict(torch.load(last_model))
-                    self.load_history()
                     self.epoch = last_epoch
                     print(f'[TRAIN] Loaded last model at epoch {last_epoch}')
             
@@ -411,7 +426,7 @@ class FullySupervisedTrainer(BaseTrainer):
                         writer.add_scalar(f'{metric_fn.__name__}/train', self.history[f'train_{metric_fn.__name__}'][-1], self.epoch)
                         writer.add_scalar(f'{metric_fn.__name__}/val', self.history[f'val_{metric_fn.__name__}'][-1], self.epoch)
             
-            self.save_history()
+                self.save_history()
             self.plot_history()
             if self.config.training.return_best_model:
                 self.model.load_state_dict(torch.load(os.path.join(self.model_path, f'best_model_epoch_{best_epoch}_val_loss_{best_loss}.pth')))

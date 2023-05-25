@@ -1,0 +1,91 @@
+---
+  production: 
+    experiment_name: nyc_lc_8class_MULTICLASS_ALL
+    include_date_in_results_folder: False
+    seed: 1701
+
+    dataset:
+      dir: "test_datasets/imgs"
+      save_datasets: True
+      load_saved_dataset: True # speeds up dataset loading
+      splits: # leave empty for 0 splits
+        # - train
+        # - val
+        # - test
+      gt_target_folders: # IMPORTANT" INPUT SHOULD ALWAYS ALWAYS ALWAYS GO FIRST
+      # FIXME
+        - input 
+        - targets
+      
+      # options for specifying files to loads
+      # landsat 8 provided as example
+      # https://torchgeo.readthedocs.io/en/latest/tutorials/custom_raster_dataset.html
+      inputs:
+        filename_glob: "img_*.tiff" # if loading images, only parameter needed for this
+        filename_regex:
+        date_format: 
+        is_image: False
+        separate_files: False
+        all_bands: ["Green", "Red", "NIR"]
+        rgb_bands: ["Green", "Red", "NIR"]
+
+      targets:
+        filename_glob: "label_*.tiff" # if loading images, only parameter needed for this
+        filename_regex:
+        date_format: "%Y%m%dT%H%M%S"
+        is_image: False
+        separate_files: False
+      
+      # only used if dataset.splits is empty
+      # specify sampler to use: dataset splt (0,1)
+      splits_to_use:
+        train: 
+          - 0.6
+          # - random
+        val: 
+          - 0.2
+          # - random
+        test:
+          - 0.2
+          # - grid
+      
+      normalize: True
+      augmentation: True
+      binary_class: 
+
+    model:
+      model_arch: UNet
+      model_encoder: efficientnet-b4
+      encoder_weights: 'imagenet'
+      in_channels: 3
+      classes: 8 # 1 for binary segmentation
+      input_preprocessing: False
+      decoder_attention_type: # 'scse' # only really used in UNet
+    
+    training:
+      epochs: 100
+      optimizer: 'adam'
+      loss: bce
+      lr: 0.001
+      beta1: 0.9
+      beta2: 0.999
+      eps: 0.00000001
+      accumulate_grads: False
+      schema: "fs" # fs, ssl, wl, us
+      batch_size: 8
+      return_best_model: True
+      save_best_model: True
+      save_every_model: True
+      tensorboard: True
+      early_stopping_patience: 3
+      early_stopping_min_delta: 0
+      # use_trt: True
+      load_from_checkpoint: True
+    
+    evaluation:
+      save_all_test_data: True
+      metrics_reduction: micro
+      use_best_model: True
+      use_model_path:
+      load_previous_log: True
+...
